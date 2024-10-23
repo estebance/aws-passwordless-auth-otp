@@ -1,0 +1,150 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  passwordless-auth-pool
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Parameters:
+  CognitoUserPoolName:
+    Type: String
+    Default: 'passwordless-userpool'
+  EmailSender:
+    Type: String
+  AppEnv:
+    Type: String
+    Default: 'dev'
+Globals:
+  Function:
+    Timeout: 30
+    Tracing: Active
+    LoggingConfig:
+      LogFormat: JSON
+  Api:
+    TracingEnabled: true
+Resources:
+  # COGNITO USERPOOL
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "${CognitoUserPoolName}-${AppEnv}"
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+      UsernameAttributes:
+        - email
+        - phone_number
+      AutoVerifiedAttributes:
+        - email
+      Schema:
+        - AttributeDataType: String
+          Name: email
+          Required: true
+        - AttributeDataType: String
+          Name: phone_number
+          Required: true
+  # COGNITO USER POOL DOMAIN
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub "${CognitoUserPoolName}-${AppEnv}"
+      UserPoolId: !Ref UserPool
+  # COGNITO USER POOL CLIENT
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      GenerateSecret: false
+      ClientName: !Sub "${CognitoUserPoolName}-client-${AppEnv}"
+      UserPoolId: !Ref UserPool
+      ExplicitAuthFlows:
+        - ALLOW_CUSTOM_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+  # AUTH FUNCTIONS
+  PreSignUpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/pre_sign_up
+      Handler: app.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - x86_64
+      Events:
+        CognitoUserPoolPreSignup:
+          Type: Cognito
+          Properties:
+            UserPool: !Ref UserPool
+            Trigger: PreSignUp
+  DefineAuthChallengeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/define_auth_challenge
+      Handler: app.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - x86_64
+      Events:
+        CognitoUserPoolDefineAuthChallenge:
+          Type: Cognito
+          Properties:
+            UserPool: !Ref UserPool
+            Trigger: DefineAuthChallenge
+  CreateAuthChallengeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/create_auth_challenge
+      Handler: app.handler
+      Runtime: nodejs20.x
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'ses:SendEmail*'
+              Resource: '*'
+      Environment:
+        Variables:
+          EMAIL_SENDER_AWS: !Ref EmailSender
+      Architectures:
+        - x86_64
+      Events:
+        CognitoUserPoolCreateAuthChallenge:
+          Type: Cognito
+          Properties:
+            UserPool: !Ref UserPool
+            Trigger: CreateAuthChallenge
+  VerifyAuthChallengeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/verify_auth_challenge
+      Handler: app.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - x86_64
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'cognito-idp:*'
+              Resource: '*'
+      Events:
+        CognitoUserPoolVerifyAuthChallenge:
+          Type: Cognito
+          Properties:
+            UserPool: !Ref UserPool
+            Trigger: VerifyAuthChallengeResponse
+  ApplicationResourceGroup:
+    Type: AWS::ResourceGroups::Group
+    Properties:
+      Name:
+        Fn::Sub: ApplicationInsights-SAM-${AWS::StackName}
+      ResourceQuery:
+        Type: CLOUDFORMATION_STACK_1_0
+  ApplicationInsightsMonitoring:
+    Type: AWS::ApplicationInsights::Application
+    Properties:
+      ResourceGroupName:
+        Ref: ApplicationResourceGroup
+      AutoConfigurationEnabled: 'true'
+Outputs:
+  PreSignUpFunction:
+    Description: PresignUpFunction
+    Value: !GetAtt PreSignUpFunction.Arn

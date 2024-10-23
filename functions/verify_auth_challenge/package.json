@@ -1,0 +1,14 @@
+{
+  "name": "verify_auth_challenge",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.677.0"
+  }
+}
